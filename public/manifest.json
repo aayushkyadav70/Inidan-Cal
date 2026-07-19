@@ -1,0 +1,36 @@
+{
+  "name": "Remix: Indian Cal",
+  "short_name": "Indian Cal",
+  "description": "A thali-style Indian food calorie and macro tracker with AI photo and description food identification.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F4E9CE",
+  "theme_color": "#1F1B14",
+  "icons": [
+    {
+      "src": "/app-icon.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/app-icon.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/app-icon.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/app-icon.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "maskable"
+    }
+  ]
+}

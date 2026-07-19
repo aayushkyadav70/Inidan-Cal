@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Settings, 
+  Download,
   ChevronLeft, 
   ChevronRight, 
   Camera, 
@@ -76,6 +77,38 @@ const QUICK_ADD = [
 
 export default function App() {
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
+  
+  // PWA Install Prompt State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBtn, setShowInstallBtn] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBtn(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    // Hide button if already running in standalone mode (installed)
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setShowInstallBtn(false);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`User response to install prompt: ${outcome}`);
+    setDeferredPrompt(null);
+    setShowInstallBtn(false);
+  };
   
   // Onboarding State
   const [isOnboarded, setIsOnboarded] = useState<boolean>(() => {
@@ -1695,20 +1728,33 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
               calories &amp; macros, Indian style
             </p>
           </div>
-          <button 
-            id="settings-trigger-btn"
-            onClick={() => {
-              setGCal(goals.calories.toString());
-              setGProtein(goals.protein.toString());
-              setGCarbs(goals.carbs.toString());
-              setGFat(goals.fat.toString());
-              setIsSettingsOpen(true);
-            }} 
-            className="p-2 text-ink opacity-70 hover:opacity-100 transition-opacity cursor-pointer"
-            aria-label="Settings"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            {showInstallBtn && (
+              <button
+                id="pwa-install-header-btn"
+                onClick={handleInstallClick}
+                className="p-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[11.5px] font-bold flex items-center gap-1 transition-all shadow-md cursor-pointer mr-1 animate-pulse"
+                title="Install app to your home screen"
+              >
+                <Download className="w-3.5 h-3.5 animate-bounce" />
+                <span>Install</span>
+              </button>
+            )}
+            <button 
+              id="settings-trigger-btn"
+              onClick={() => {
+                setGCal(goals.calories.toString());
+                setGProtein(goals.protein.toString());
+                setGCarbs(goals.carbs.toString());
+                setGFat(goals.fat.toString());
+                setIsSettingsOpen(true);
+              }} 
+              className="p-2 text-ink opacity-70 hover:opacity-100 transition-opacity cursor-pointer"
+              aria-label="Settings"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </div>
         </header>
 
         {/* Date Selector bar */}
@@ -2924,6 +2970,22 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
             >
               Save targets
             </button>
+
+            {showInstallBtn && (
+              <div className="pt-4 border-t border-rule/50 mt-2">
+                <button
+                  type="button"
+                  onClick={handleInstallClick}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl cursor-pointer transition-colors flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Install App on Home Screen
+                </button>
+                <p className="text-[10.1px] text-ink-soft text-center mt-1.5 leading-tight">
+                  Get offline support, smaller app size, and instant calorie logs!
+                </p>
+              </div>
+            )}
 
             <div className="pt-2 text-center border-t border-rule/50 mt-4">
               <button
