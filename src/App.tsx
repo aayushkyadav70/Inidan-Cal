@@ -17,9 +17,60 @@ import {
   Dumbbell,
   Share2,
   Instagram,
-  MapPin
+  MapPin,
+  Sun,
+  Moon,
+  WifiOff,
+  Smartphone,
+  Laptop,
+  Globe,
+  ChevronDown,
+  Copy,
+  Terminal
 } from 'lucide-react';
 import { CalorieGoals, FoodEntry, FoodAnalysisResult } from './types';
+import { INDIAN_FOOD_DB, DBFoodItem, parseDescriptionToLocalMatch, ParsedMatch } from './foodDatabase';
+
+// Helper to get fully qualified API URL in Native / Hybrid App environments
+const getApiUrl = (endpoint: string): string => {
+  const isNative = typeof window !== 'undefined' && (
+    (window as any).Capacitor ||
+    window.location.protocol === 'file:' ||
+    window.location.origin.startsWith('capacitor://') ||
+    window.location.origin.startsWith('http://localhost:80')
+  );
+
+  if (isNative) {
+    const DEPLOY_SERVER = "https://ais-pre-52i4vh4kawbh4cskvpphw2-638346396264.asia-southeast1.run.app";
+    return `${DEPLOY_SERVER}${endpoint}`;
+  }
+  return endpoint;
+};
+
+// AI Scan Limit Helpers
+const getAiScanCountForToday = (): number => {
+  const stored = localStorage.getItem('ai_scan_history');
+  if (!stored) return 0;
+  try {
+    const dates: string[] = JSON.parse(stored);
+    const todayStr = new Date().toDateString();
+    return dates.filter(d => d === todayStr).length;
+  } catch (e) {
+    return 0;
+  }
+};
+
+const incrementAiScanCount = () => {
+  const stored = localStorage.getItem('ai_scan_history');
+  let dates: string[] = [];
+  if (stored) {
+    try { dates = JSON.parse(stored); } catch (e) {}
+  }
+  const todayStr = new Date().toDateString();
+  dates.push(todayStr);
+  if (dates.length > 50) dates = dates.slice(-50);
+  localStorage.setItem('ai_scan_history', JSON.stringify(dates));
+};
 
 const DEFAULT_GOALS: CalorieGoals = { calories: 2000, protein: 120, carbs: 250, fat: 65 };
 
@@ -78,6 +129,27 @@ const QUICK_ADD = [
 export default function App() {
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   
+  // Theme Toggle State
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const stored = localStorage.getItem('theme');
+    if (stored === 'dark' || stored === 'light') {
+      return stored;
+    }
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark';
+    }
+    return 'light';
+  });
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+  
   // PWA Install Prompt State
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBtn, setShowInstallBtn] = useState<boolean>(false);
@@ -116,6 +188,7 @@ export default function App() {
   });
   const [onboardStep, setOnboardStep] = useState<number>(0);
   
+  const [onboardName, setOnboardName] = useState<string>(() => localStorage.getItem('onboard_name') || '');
   const [onboardAge, setOnboardAge] = useState<string>(() => localStorage.getItem('onboard_age') || '25');
   const [onboardGender, setOnboardGender] = useState<'male' | 'female' | 'other'>(() => (localStorage.getItem('onboard_gender') as any) || 'male');
   const [onboardWeight, setOnboardWeight] = useState<string>(() => localStorage.getItem('onboard_weight') || '65'); // in kg
@@ -268,6 +341,27 @@ export default function App() {
     return stored === 'true';
   });
 
+  // Offline status tracking
+  const [isOffline, setIsOffline] = useState<boolean>(() => {
+    if (typeof navigator !== 'undefined') {
+      return !navigator.onLine;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   // AI Food Analysis Scan Mode State
   const [scanMode, setScanMode] = useState<'photo' | 'describe'>('photo');
   const [descriptionText, setDescriptionText] = useState('');
@@ -277,7 +371,30 @@ export default function App() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<FoodAnalysisResult | null>(null);
 
+  // AI Scan Limit State
+  const [aiScansToday, setAiScansToday] = useState<number>(0);
+
+  useEffect(() => {
+    setAiScansToday(getAiScanCountForToday());
+  }, []);
+
+  // Local Direct Matching States
+  const [localMatches, setLocalMatches] = useState<ParsedMatch[]>([]);
+  const [dirSearchQuery, setDirSearchQuery] = useState('');
+  const [dirSelectedCategory, setDirSelectedCategory] = useState('All');
+
+  useEffect(() => {
+    if (scanMode === 'describe') {
+      const parsed = parseDescriptionToLocalMatch(descriptionText);
+      setLocalMatches(parsed);
+    } else {
+      setLocalMatches([]);
+    }
+  }, [descriptionText, scanMode]);
+
+
   // Manual Add Form State
+  const [manualTab, setManualTab] = useState<'search' | 'custom'>('search');
   const [mName, setMName] = useState('');
   const [mCal, setMCal] = useState('');
   const [mProtein, setMProtein] = useState('');
@@ -292,6 +409,7 @@ export default function App() {
   const [rFat, setRFat] = useState('');
 
   // Settings Goals Form State
+  const [gName, setGName] = useState(onboardName);
   const [gCal, setGCal] = useState(goals.calories.toString());
   const [gProtein, setGProtein] = useState(goals.protein.toString());
   const [gCarbs, setGCarbs] = useState(goals.carbs.toString());
@@ -299,6 +417,18 @@ export default function App() {
 
   // Desi Fitness Avatar State
   const [desiAvatar, setDesiAvatar] = useState<string>(() => localStorage.getItem('desi_avatar') || 'muscle_rohit');
+
+  // Helper to dynamically rename 'Muscle Rohit' to user's custom name
+  const getAvatarInfo = (id: string) => {
+    const av = AVATARS.find(a => a.id === id) || AVATARS[0];
+    if (av.id === 'muscle_rohit') {
+      return {
+        ...av,
+        name: `Muscle ${onboardName || 'Rohit'}`
+      };
+    }
+    return av;
+  };
 
   // Workout Sound System States
   const [musicPlaying, setMusicPlaying] = useState(false);
@@ -311,6 +441,11 @@ export default function App() {
 
   // Cheat Day Meter States
   const [selectedCheat, setSelectedCheat] = useState("samosa");
+
+  // Mobile & PWA Export Guide States
+  const [activeAppCenterTab, setActiveAppCenterTab] = useState<'pwa' | 'apk'>('pwa');
+  const [showCopiedText, setShowCopiedText] = useState<string | null>(null);
+  const [isAppCenterOpen, setIsAppCenterOpen] = useState(false);
 
   const fetchWorkoutMusic = async () => {
     setMusicLoading(true);
@@ -329,7 +464,7 @@ export default function App() {
     }
 
     try {
-      const response = await fetch("/api/generate-workout-music", {
+      const response = await fetch(getApiUrl("/api/generate-workout-music"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: moodPrompt }),
@@ -585,7 +720,7 @@ export default function App() {
     const diff = current - previous;
     const absDiff = Math.abs(diff).toFixed(1);
     
-    const currentAvatarInfo = AVATARS.find(a => a.id === desiAvatar) || AVATARS[0];
+    const currentAvatarInfo = getAvatarInfo(desiAvatar);
     const avatarEmoji = currentAvatarInfo.emoji;
     const avatarName = currentAvatarInfo.name;
 
@@ -699,10 +834,11 @@ export default function App() {
     ctx.font = 'bold 32px Georgia, serif';
     ctx.fillText('🇮🇳 INDIAN CAL', 400, 65);
 
-    // Subtitle
+    // Subtitle with user's name
     ctx.fillStyle = '#B49664'; // Elegant light gold/brass
     ctx.font = 'bold 12px monospace';
-    ctx.fillText('DAILY MACRO SUMMARY', 400, 105);
+    const subtitleText = onboardName ? `${onboardName.toUpperCase()}'S DAILY MACRO SUMMARY` : 'DAILY MACRO SUMMARY';
+    ctx.fillText(subtitleText, 400, 105);
 
     // Beautiful subtle divider line
     ctx.strokeStyle = 'rgba(180, 150, 100, 0.2)';
@@ -713,7 +849,7 @@ export default function App() {
     ctx.stroke();
 
     // Active Avatar badge
-    const activeAvatarObj = AVATARS.find(a => a.id === desiAvatar) || AVATARS[0];
+    const activeAvatarObj = getAvatarInfo(desiAvatar);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
     ctx.strokeStyle = 'rgba(180, 150, 100, 0.15)';
     ctx.lineWidth = 1;
@@ -890,10 +1026,13 @@ export default function App() {
   };
 
   const handleCopyShareText = () => {
-    const activeAvatarObj = AVATARS.find(a => a.id === desiAvatar) || AVATARS[0];
+    const activeAvatarObj = getAvatarInfo(desiAvatar);
     const streakDays = getStreakCount();
     const streakText = streakDays > 0 ? `🔥 Current Streak: ${streakDays} days\n` : '';
-    const text = `🇮🇳 My Indian Cal Macro Progress (${displayDateStr(currentDate)})
+    const shareTitle = onboardName 
+      ? `🇮🇳 ${onboardName}'s Indian Cal Macro Progress (${displayDateStr(currentDate)})`
+      : `🇮🇳 My Indian Cal Macro Progress (${displayDateStr(currentDate)})`;
+    const text = `${shareTitle}
 
 ${streakText}⚡ Calories: ${Math.round(totals.calories)} / ${goals.calories} kcal
 🥩 Protein: ${Math.round(totals.protein)}g / ${goals.protein}g
@@ -986,6 +1125,12 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
     };
     localStorage.setItem('goals', JSON.stringify(newGoals));
     setGoals(newGoals);
+
+    if (gName.trim()) {
+      localStorage.setItem('onboard_name', gName.trim());
+      setOnboardName(gName.trim());
+    }
+
     setIsSettingsOpen(false);
   };
 
@@ -1041,35 +1186,266 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
     const activeGymValue = gymVal !== undefined ? gymVal : isGymFocus;
     const activeVegValue = vegVal !== undefined ? vegVal : isVegOnly;
 
-    try {
-      const res = await fetch('/api/suggest-meals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          remainingCalories,
-          remainingProtein,
-          remainingCarbs,
-          remainingFat,
-          goal: onboardGoal,
-          activity: onboardActivity,
-          isGymPerson: activeGymValue,
-          isVegOnly: activeVegValue
-        })
-      });
+    // Simulate an organic loading delay for delightful UI feedback
+    setTimeout(() => {
+      try {
+        const isItemVeg = (foodItem: DBFoodItem): boolean => {
+          const nameLower = foodItem.name.toLowerCase();
+          
+          const nonVegKeywords = [
+            'chicken', 'fish', 'mutton', 'meat', 'shrimp', 'prawn', 'pork', 'beef', 'murgh', 'anda', 'keema', 'bhurji'
+          ];
+          
+          const hasNonVegKeyword = nonVegKeywords.some(keyword => {
+            if (keyword === 'keema' && (nameLower.includes('soya') || nameLower.includes('soyabean'))) return false;
+            if (keyword === 'bhurji' && (nameLower.includes('paneer') || nameLower.includes('soya') || nameLower.includes('soyabean'))) return false;
+            return nameLower.includes(keyword);
+          });
+          
+          if (hasNonVegKeyword) return false;
+          
+          if (nameLower.includes('egg') && !nameLower.includes('eggplant')) {
+            return false;
+          }
+          if (nameLower.includes('omelette') || nameLower.includes('omlet') || nameLower.includes('half fry') || nameLower.includes('half-fry') || nameLower.includes('sunny side up')) {
+            return false;
+          }
 
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error || `Failed to generate suggestions (status: ${res.status})`);
+          if (foodItem.aliases) {
+            for (const alias of foodItem.aliases) {
+              const aliasLower = alias.toLowerCase();
+              const hasAliasNonVeg = nonVegKeywords.some(keyword => {
+                if (keyword === 'keema' && (aliasLower.includes('soya') || aliasLower.includes('soyabean'))) return false;
+                if (keyword === 'bhurji' && (aliasLower.includes('paneer') || aliasLower.includes('soya') || aliasLower.includes('soyabean'))) return false;
+                return aliasLower.includes(keyword);
+              });
+              if (hasAliasNonVeg) return false;
+              if (aliasLower.includes('egg') && !aliasLower.includes('eggplant')) return false;
+              if (aliasLower.includes('omelette') || aliasLower.includes('omlet') || aliasLower.includes('half fry') || aliasLower.includes('half-fry') || aliasLower.includes('sunny side up')) return false;
+            }
+          }
+
+          return true;
+        };
+
+        const allowedFoods = INDIAN_FOOD_DB.filter(food => {
+          if (activeVegValue) {
+            return isItemVeg(food);
+          }
+          return true;
+        });
+
+        if (allowedFoods.length === 0) {
+          setSuggestedMeals([]);
+          setIsSuggestLoading(false);
+          return;
+        }
+
+        const scoreItem = (food: DBFoodItem) => {
+          let score = 100;
+
+          // Calorie fit
+          if (remainingCalories > 150) {
+            const calDiff = remainingCalories - food.calories;
+            if (calDiff < 0) {
+              score -= Math.abs(calDiff) * 0.4; // Penalize going over budget
+            } else {
+              // Reward fitting nicely in remaining budget
+              const ratio = food.calories / remainingCalories;
+              if (ratio > 0.3 && ratio <= 0.85) {
+                score += 35;
+              } else if (ratio > 0.85) {
+                score += 10;
+              } else {
+                score += ratio * 15;
+              }
+            }
+          } else {
+            // Budget is very small or negative: prefer very low calorie foods
+            score -= food.calories * 0.6;
+          }
+
+          // Protein bonus (especially for Gym Focus)
+          if (activeGymValue) {
+            const density = food.protein / (food.calories || 1);
+            score += density * 150;
+            score += food.protein * 2.5;
+          } else {
+            score += food.protein * 1.0;
+          }
+
+          // Carbs check
+          if (remainingCarbs <= 0) {
+            if (food.carbs > 5) score -= food.carbs * 1.5;
+          } else {
+            const carbsDiff = remainingCarbs - food.carbs;
+            if (carbsDiff < 0) {
+              score -= Math.abs(carbsDiff) * 0.8;
+            } else {
+              score += (food.carbs / remainingCarbs) * 10;
+            }
+          }
+
+          // Fat check
+          if (remainingFat <= 0) {
+            if (food.fat > 2) score -= food.fat * 2.5;
+          } else {
+            const fatDiff = remainingFat - food.fat;
+            if (fatDiff < 0) {
+              score -= Math.abs(fatDiff) * 1.2;
+            } else {
+              score += (food.fat / remainingFat) * 8;
+            }
+          }
+
+          return score;
+        };
+
+        // Group 1: High-Protein Main Meals
+        const group1 = allowedFoods.filter(food => {
+          const isMainCat = ["Dairy & Gym Staples", "Dals & Curries"].includes(food.category);
+          const isProteinHigh = food.protein >= 8;
+          const nameL = food.name.toLowerCase();
+          const hasProteinTerm = ["soya", "paneer", "chicken", "egg", "dal", "chole", "rajma", "tofu"].some(t => nameL.includes(t));
+          return isMainCat || isProteinHigh || hasProteinTerm;
+        });
+
+        // Group 2: Grain, Bread, & South Indian Breakfast Staples
+        const group2 = allowedFoods.filter(food => {
+          const isStapleCat = ["Breads & Staples", "Rice & Grains", "Breakfast & South Indian"].includes(food.category);
+          const nameL = food.name.toLowerCase();
+          const hasStapleTerm = ["roti", "paratha", "poha", "upma", "dosa", "rice", "khichdi", "idli", "chapati", "phulka"].some(t => nameL.includes(t));
+          return isStapleCat || hasStapleTerm;
+        });
+
+        // Group 3: Light Snacks, Refreshments, Salads & Supplements
+        const group3 = allowedFoods.filter(food => {
+          const isSnackCat = ["Fruits & Salads", "Street Food & Snacks"].includes(food.category);
+          const nameL = food.name.toLowerCase();
+          const hasSnackTerm = ["chaas", "salad", "buttermilk", "sattu", "whey", "curd", "dahi", "sprouts", "soup", "coffee", "tea", "chai", "cucumber", "fruit"].some(t => nameL.includes(t));
+          const isLight = food.calories < 180;
+          return isSnackCat || hasSnackTerm || isLight;
+        });
+
+        const scoredGroup1 = group1.map(food => ({ food, score: scoreItem(food) })).sort((a, b) => b.score - a.score);
+        const scoredGroup2 = group2.map(food => ({ food, score: scoreItem(food) })).sort((a, b) => b.score - a.score);
+        const scoredGroup3 = group3.map(food => ({ food, score: scoreItem(food) })).sort((a, b) => b.score - a.score);
+
+        const finalSelected: DBFoodItem[] = [];
+        
+        let g1Idx = 0, g2Idx = 0, g3Idx = 0;
+        
+        // Interleave to provide balanced 10 options
+        while (finalSelected.length < 10) {
+          let added = false;
+          if (g1Idx < scoredGroup1.length && finalSelected.length < 10) {
+            const item = scoredGroup1[g1Idx].food;
+            if (!finalSelected.some(f => f.id === item.id)) {
+              finalSelected.push(item);
+            }
+            g1Idx++;
+            added = true;
+          }
+          if (g2Idx < scoredGroup2.length && finalSelected.length < 10) {
+            const item = scoredGroup2[g2Idx].food;
+            if (!finalSelected.some(f => f.id === item.id)) {
+              finalSelected.push(item);
+            }
+            g2Idx++;
+            added = true;
+          }
+          if (g3Idx < scoredGroup3.length && finalSelected.length < 10) {
+            const item = scoredGroup3[g3Idx].food;
+            if (!finalSelected.some(f => f.id === item.id)) {
+              finalSelected.push(item);
+            }
+            g3Idx++;
+            added = true;
+          }
+          if (!added) break;
+        }
+
+        // Fallback: fill up to 10 with any allowed foods not already added
+        while (finalSelected.length < 10 && allowedFoods.length > finalSelected.length) {
+          const extra = allowedFoods.find(x => !finalSelected.some(f => f.id === x.id));
+          if (extra) {
+            finalSelected.push(extra);
+          } else {
+            break;
+          }
+        }
+
+        const suggestions = finalSelected.map((item) => {
+          let trend_label = "";
+          let why_fits = "";
+
+          const nameLower = item.name.toLowerCase();
+          const isProteinRich = item.protein >= 10;
+
+          if (nameLower.includes("soya")) {
+            trend_label = "🌱 Pure Veg Muscle Builder";
+          } else if (nameLower.includes("paneer")) {
+            trend_label = "🧀 Rich Desi Paneer Power";
+          } else if (nameLower.includes("chicken")) {
+            trend_label = "🍗 Gym Bro Ultimate Fuel";
+          } else if (nameLower.includes("egg") && !nameLower.includes("eggplant")) {
+            trend_label = "🍳 Quick Egg Charge";
+          } else if (nameLower.includes("roti") || nameLower.includes("chapati") || nameLower.includes("phulka")) {
+            trend_label = "🫓 Lean Roti Staple";
+          } else if (nameLower.includes("paratha")) {
+            trend_label = "🍽️ Traditional Stuffed Feast";
+          } else if (nameLower.includes("poha") || nameLower.includes("upma")) {
+            trend_label = "⚡ Pure Energy Morning Starter";
+          } else if (nameLower.includes("khichdi")) {
+            trend_label = "🥣 Soothing Desi Comfort Fuel";
+          } else if (nameLower.includes("chaas") || nameLower.includes("buttermilk")) {
+            trend_label = "🥤 Refreshing Chilled Chaas";
+          } else if (nameLower.includes("sattu")) {
+            trend_label = "🌾 Sattu Super Stamina Drink";
+          } else if (nameLower.includes("whey")) {
+            trend_label = "🥛 Quick Whey Shake";
+          } else if (nameLower.includes("salad")) {
+            trend_label = "🥗 Clean Green fiber & detox";
+          } else if (nameLower.includes("curd") || nameLower.includes("dahi")) {
+            trend_label = "🥣 Cool Probiotic Dahi Shield";
+          } else if (isProteinRich) {
+            trend_label = "💪 High-Protein Champ Force";
+          } else if (item.category === "Sweets & Desserts") {
+            trend_label = "🍬 Small Cheat Treat Portion";
+          } else if (item.calories < 120) {
+            trend_label = "🍿 Light Calorie Saver";
+          } else {
+            trend_label = "🍛 Authentic Desi Gravy Fit";
+          }
+
+          if (remainingCalories <= 150) {
+            why_fits = `An ultra-light choice containing only ${item.calories} calories, making it exceptionally safe for your tight remaining calorie budget today.`;
+          } else if (activeGymValue && item.protein >= 8) {
+            why_fits = `Provides a massive ${item.protein}g of muscle-building protein for just ${item.calories} kcal, aligning perfectly with your Gym Focus objectives.`;
+          } else {
+            why_fits = `Offers a well-rounded mix of ${item.protein}g protein and ${item.carbs}g carbs, helping you comfortably satisfy your remaining goals.`;
+          }
+
+          return {
+            meal_name: item.name,
+            portion: item.serving,
+            calories: item.calories,
+            protein_g: item.protein,
+            carbs_g: item.carbs,
+            fat_g: item.fat,
+            why_fits,
+            trend_label
+          };
+        });
+
+        setSuggestedMeals(suggestions);
+      } catch (err: any) {
+        console.error(err);
+        setSuggestError(err.message || 'Could not fetch suggestions. Please try again.');
+      } finally {
+        setIsSuggestLoading(false);
       }
-
-      const data = await res.json();
-      setSuggestedMeals(data.suggestions || []);
-    } catch (err: any) {
-      console.error(err);
-      setSuggestError(err.message || 'Could not fetch suggestions. Please try again.');
-    } finally {
-      setIsSuggestLoading(false);
-    }
+    }, 450);
   };
 
   // Image upload pipeline & resizing
@@ -1119,10 +1495,20 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
     setAnalysisResult(null);
     setAnalysisError(null);
     setIsAnalyzing(false);
+    setLocalMatches([]);
+    setDirSearchQuery('');
+    setDirSelectedCategory('All');
   };
 
   // AI Analyze call
   const handleAIAnalyze = async () => {
+    // Check daily scan limit
+    const todayCount = getAiScanCountForToday();
+    if (todayCount >= 3) {
+      setAnalysisError('Daily AI usage limit reached (3 scans per day). Please use our Direct Search or Manual Add options to log your meals without any limits!');
+      return;
+    }
+
     if (scanMode === 'photo' && !base64PhotoData) {
       setAnalysisError('Please take or upload a food photo first.');
       return;
@@ -1137,7 +1523,7 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
     setAnalysisResult(null);
 
     try {
-      const response = await fetch('/api/analyze-food', {
+      const response = await fetch(getApiUrl('/api/analyze-food'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1156,6 +1542,10 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
 
       const result: FoodAnalysisResult = await response.json();
       setAnalysisResult(result);
+      
+      // Increment AI scan limit
+      incrementAiScanCount();
+      setAiScansToday(getAiScanCountForToday());
 
       // Populate edit fields
       setRName(result.dish_name);
@@ -1215,13 +1605,37 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
                     Welcome to <br/>Indian <em className="italic font-medium text-protein">Cal</em>
                   </h1>
                   <p className="text-ink-soft text-sm max-w-xs mx-auto leading-relaxed">
-                    Track your Biryani, Paneer, or home-cooked Dal-Roti accurately. Powered by Gemini AI to estimate nutrients directly from your plate photos.
+                    Track your Biryani, Paneer, or home-cooked Dal-Roti accurately. Powered by Gemini AI to estimate nutrients from photos, and loaded with a massive database of 4,500+ Indian foods &amp; dishes for instant, offline direct logs!
                   </p>
                 </div>
-                <div className="pt-4">
+                
+                {/* Ask user's name on starting page */}
+                <div className="space-y-2 text-left max-w-xs mx-auto pt-2">
+                  <label className="text-xs font-bold text-protein tracking-wider uppercase block">Your Name</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. Aayush" 
+                    value={onboardName}
+                    onChange={(e) => setOnboardName(e.target.value)}
+                    className="w-full px-4 py-3 bg-surface-2 text-ink rounded-xl border border-rule/60 focus:outline-none focus:border-protein font-medium text-sm transition-colors shadow-inner"
+                  />
+                  {!onboardName.trim() && (
+                    <span className="text-[11px] text-ink-soft italic block mt-1">Please enter your name to begin your journey.</span>
+                  )}
+                </div>
+
+                <div className="pt-2">
                   <button 
-                    onClick={() => setOnboardStep(1)}
-                    className="w-full py-4 bg-bg-deep text-surface-2 font-bold text-sm rounded-xl shadow-lg cursor-pointer hover:bg-bg-deep/90 transition-colors"
+                    onClick={() => {
+                      if (onboardName.trim()) {
+                        localStorage.setItem('onboard_name', onboardName.trim());
+                        setOnboardStep(1);
+                      }
+                    }}
+                    disabled={!onboardName.trim()}
+                    className={`w-full py-4 bg-bg-deep text-surface-2 font-bold text-sm rounded-xl shadow-lg cursor-pointer hover:bg-bg-deep/90 transition-all ${
+                      !onboardName.trim() ? 'opacity-50 cursor-not-allowed scale-98' : 'active:scale-[0.98]'
+                    }`}
                   >
                     Get Started
                   </button>
@@ -1669,6 +2083,7 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
                       };
                       localStorage.setItem('goals', JSON.stringify(finalGoals));
                       localStorage.setItem('onboarded', 'true');
+                      localStorage.setItem('onboard_name', onboardName);
                       localStorage.setItem('onboard_age', onboardAge);
                       localStorage.setItem('onboard_gender', onboardGender);
                       localStorage.setItem('onboard_weight', onboardWeight);
@@ -1697,6 +2112,18 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
     <div id="calorie-tracker-root" className="min-h-screen bg-bg text-ink flex flex-col font-sans">
       <div className="max-w-[480px] w-full mx-auto px-4 pt-5 pb-24 flex flex-col">
         
+        {/* Above App Interface Greeting Banner */}
+        {onboardName && (
+          <div id="above-interface-user-badge" className="flex items-center justify-between text-[11px] font-bold text-protein/90 mb-2 px-2.5 py-1.5 bg-protein/5 border border-protein/10 rounded-lg shadow-sm">
+            <span className="flex items-center gap-1.5">
+              ✨ <span>Active Profile: <strong>{onboardName}</strong></span>
+            </span>
+            <span className="text-[10px] font-mono font-medium text-ink-soft uppercase tracking-wider">
+              Stay Healthy &amp; Fit
+            </span>
+          </div>
+        )}
+
         {/* Header Section */}
         <header id="tracker-header" className="flex items-center justify-between mb-2">
           <div>
@@ -1704,7 +2131,7 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
               Indian <em className="italic font-medium text-protein">Cal</em>
               {/* Active Avatar Badge */}
               {(() => {
-                const currentAv = AVATARS.find(a => a.id === desiAvatar) || AVATARS[0];
+                const currentAv = getAvatarInfo(desiAvatar);
                 return (
                   <button
                     type="button"
@@ -1729,20 +2156,33 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
             </p>
           </div>
           <div className="flex items-center gap-1.5">
-            {showInstallBtn && (
-              <button
-                id="pwa-install-header-btn"
-                onClick={handleInstallClick}
-                className="p-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[11.5px] font-bold flex items-center gap-1 transition-all shadow-md cursor-pointer mr-1 animate-pulse"
-                title="Install app to your home screen"
+            {isOffline && (
+              <div 
+                id="offline-status-badge"
+                className="px-2 py-1 bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/25 rounded-lg text-[10.5px] font-semibold flex items-center gap-1 animate-pulse"
+                title="Working offline. Your logs are safely and automatically saved to your local database!"
               >
-                <Download className="w-3.5 h-3.5 animate-bounce" />
-                <span>Install</span>
-              </button>
+                <WifiOff className="w-3 h-3" />
+                <span>Saved Offline</span>
+              </div>
             )}
+            <button 
+              id="theme-toggle-btn"
+              onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')} 
+              className="p-2 text-ink opacity-70 hover:opacity-100 transition-all cursor-pointer rounded-xl hover:bg-surface-2/50 flex items-center justify-center"
+              title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+              aria-label="Toggle Theme"
+            >
+              {theme === 'light' ? (
+                <Moon className="w-5 h-5" />
+              ) : (
+                <Sun className="w-5 h-5 text-amber-400" />
+              )}
+            </button>
             <button 
               id="settings-trigger-btn"
               onClick={() => {
+                setGName(onboardName);
                 setGCal(goals.calories.toString());
                 setGProtein(goals.protein.toString());
                 setGCarbs(goals.carbs.toString());
@@ -2583,6 +3023,11 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
               </button>
             </div>
 
+            {/* Free & AI-Optional Info Banner */}
+            <div className="p-3 bg-emerald-50/70 border border-emerald-200/50 rounded-xl mb-4 text-[11px] text-emerald-800 leading-relaxed shadow-xs">
+              💚 <strong>100% Free &amp; Offline Friendly:</strong> You do NOT need any active AI to use this app. Our local direct search database handles 4,500+ Indian meals instantly offline without any daily limits or internet required!
+            </div>
+
             {/* Mode Tabs */}
             <div className="flex bg-surface-2 rounded-xl p-1 mb-4 border border-rule/40">
               <button 
@@ -2762,138 +3207,424 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
                     />
                   </div>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-4">
+                    {/* Input box */}
                     <div className="flex flex-col gap-1">
                       <label htmlFor="description-input" className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">What did you eat?</label>
                       <textarea 
                         id="description-input"
                         value={descriptionText}
                         onChange={(e) => setDescriptionText(e.target.value)}
-                        placeholder="e.g. 100g paneer bhurji made with 2 tsp ghee, plus 3 whole wheat rotis"
-                        className="w-full bg-surface-theme border border-rule rounded-xl p-3 text-[13.5px] text-ink min-h-[100px] focus:outline-none focus:border-protein resize-none placeholder-ink-soft/40"
+                        placeholder="e.g. 2 rotis and 1 bowl of dal makhani, plus 100g paneer"
+                        className="w-full bg-surface-theme border border-rule rounded-xl p-3 text-[13.5px] text-ink min-h-[90px] focus:outline-none focus:border-protein resize-none placeholder-ink-soft/40"
                       />
                     </div>
-                    <p className="text-[10.5px] text-ink-soft italic leading-normal">
-                      Mention quantities, ghee, oil, gravy or preparation details for highly accurate estimations.
+                    <p className="text-[10.5px] text-ink-soft italic leading-normal -mt-2">
+                      Type items &amp; quantities — matched instantly from our preloaded database of 4,500+ Indian dishes &amp; regional variations.
                     </p>
+
+                    {/* Instant Matching Results & Thali Accumulator */}
+                    {localMatches.length > 0 && (
+                      <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-2xl p-4 space-y-3 shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10.5px] font-bold text-emerald-800 tracking-wider uppercase flex items-center gap-1">
+                            📊 Instant Database Matches
+                          </span>
+                          <span className="text-[9.5px] font-mono font-bold text-emerald-700 bg-white px-2 py-0.5 rounded-full border border-emerald-200/50">
+                            {localMatches.length} items
+                          </span>
+                        </div>
+                        
+                        <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                          {localMatches.map((m, idx) => {
+                            const totalCal = Math.round(m.item.calories * m.quantity);
+                            const totalP = Math.round(m.item.protein * m.quantity * 10) / 10;
+                            const totalC = Math.round(m.item.carbs * m.quantity * 10) / 10;
+                            const totalF = Math.round(m.item.fat * m.quantity * 10) / 10;
+                            
+                            return (
+                              <div key={m.item.id} className="bg-white rounded-xl p-2.5 border border-emerald-100 flex items-center justify-between gap-2 shadow-[0_1px_2px_rgba(16,185,129,0.03)]">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[12.5px] font-bold text-ink truncate block">{m.item.name}</span>
+                                    <button 
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = localMatches.filter((_, i) => i !== idx);
+                                        setLocalMatches(updated);
+                                      }}
+                                      className="text-red-500 hover:text-red-700 text-[10px] font-bold p-0.5 cursor-pointer leading-none"
+                                      title="Remove"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                  <span className="block text-[9.5px] text-ink-soft">
+                                    {m.item.serving} · <b className="text-protein font-semibold">P: {totalP}g</b> · <span className="text-carbs font-semibold">C: {totalC}g</span> · <span className="text-fat font-semibold">F: {totalF}g</span>
+                                  </span>
+                                </div>
+                                
+                                {/* Quantity Adjuster */}
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = [...localMatches];
+                                      updated[idx].quantity = Math.max(0.1, m.quantity - 0.5);
+                                      setLocalMatches(updated);
+                                    }}
+                                    className="w-6 h-6 rounded-lg bg-surface-2 border border-rule/50 flex items-center justify-center font-bold text-xs hover:bg-emerald-50 active:scale-95 cursor-pointer text-ink"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    value={m.quantity}
+                                    step="0.1"
+                                    min="0.1"
+                                    onChange={(e) => {
+                                      const updated = [...localMatches];
+                                      updated[idx].quantity = Math.max(0.1, parseFloat(e.target.value) || 1);
+                                      setLocalMatches(updated);
+                                    }}
+                                    className="w-9 text-center font-mono font-bold text-[11px] bg-surface-theme border border-rule/60 rounded-lg py-0.5 focus:outline-none focus:border-emerald-500 text-ink"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = [...localMatches];
+                                      updated[idx].quantity = m.quantity + 0.5;
+                                      setLocalMatches(updated);
+                                    }}
+                                    className="w-6 h-6 rounded-lg bg-surface-2 border border-rule/50 flex items-center justify-center font-bold text-xs hover:bg-emerald-50 active:scale-95 cursor-pointer text-ink"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                                
+                                <div className="text-right flex-shrink-0 min-w-[45px]">
+                                  <span className="font-mono font-bold text-xs text-emerald-800 block">{totalCal}</span>
+                                  <span className="text-[8px] uppercase font-bold tracking-wider text-ink-soft block -mt-1">kcal</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        
+                        {/* Totals & Add button */}
+                        {(() => {
+                          const sumCal = localMatches.reduce((acc, m) => acc + m.item.calories * m.quantity, 0);
+                          const sumP = localMatches.reduce((acc, m) => acc + m.item.protein * m.quantity, 0);
+                          const sumC = localMatches.reduce((acc, m) => acc + m.item.carbs * m.quantity, 0);
+                          const sumF = localMatches.reduce((acc, m) => acc + m.item.fat * m.quantity, 0);
+                          
+                          return (
+                            <div className="pt-2.5 border-t border-emerald-200/50 flex flex-col gap-2">
+                              <div className="flex items-center justify-between text-[11.5px] font-bold text-emerald-900">
+                                <span>Plate Total:</span>
+                                <span className="font-mono">{Math.round(sumCal)} kcal (P:{Math.round(sumP * 10) / 10}g C:{Math.round(sumC * 10) / 10}g F:{Math.round(sumF * 10) / 10}g)</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  localMatches.forEach(m => {
+                                    addEntry({
+                                      name: `${m.quantity}x ${m.item.name}`,
+                                      calories: Math.max(0, Math.round(m.item.calories * m.quantity)),
+                                      protein: Math.max(0, Math.round(m.item.protein * m.quantity * 10) / 10),
+                                      carbs: Math.max(0, Math.round(m.item.carbs * m.quantity * 10) / 10),
+                                      fat: Math.max(0, Math.round(m.item.fat * m.quantity * 10) / 10),
+                                      source: 'manual'
+                                    });
+                                  });
+                                  setIsScanOpen(false);
+                                  resetScanState();
+                                }}
+                                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[12.5px] rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-[0.98]"
+                              >
+                                <Check className="w-4 h-4" />
+                                Add {localMatches.length} matched {localMatches.length === 1 ? 'item' : 'items'} instantly (Skip AI)
+                              </button>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {/* Error log if present */}
+                    {analysisError && (
+                      <div className="p-3.5 bg-protein-soft text-danger border border-protein/20 rounded-xl text-xs font-medium leading-relaxed flex gap-2">
+                        <Info className="w-4.5 h-4.5 flex-shrink-0 text-protein mt-0.5" />
+                        <span>{analysisError}</span>
+                      </div>
+                    )}
+
+                    {/* Bottom CTA for AI estimation */}
+                    <div className="space-y-2">
+                      <button 
+                        onClick={handleAIAnalyze}
+                        className="w-full py-3 px-4 rounded-xl font-bold text-sm bg-bg-deep text-surface-2 flex items-center justify-center gap-1.5 shadow-lg shadow-bg-deep/10 cursor-pointer hover:bg-bg-deep/90 transition-all"
+                      >
+                        <Sparkles className="w-4 h-4 text-indigo-400" />
+                        Estimate Nutrition
+                      </button>
+                      <div className="flex items-center justify-between text-[10px] text-ink-soft px-1">
+                        <span>Gemini AI estimation</span>
+                        <span className="font-bold">Remaining today: {Math.max(0, 3 - aiScansToday)} / 3</span>
+                      </div>
+                    </div>
                   </div>
                 )}
-
-                {/* Error log if present */}
-                {analysisError && (
-                  <div className="p-3.5 bg-protein-soft text-danger border border-protein/20 rounded-xl text-xs font-medium leading-relaxed flex gap-2">
-                    <Info className="w-4.5 h-4.5 flex-shrink-0 text-protein mt-0.5" />
-                    <span>{analysisError}</span>
-                  </div>
-                )}
-
-                {/* Bottom CTA for AI estimation */}
-                <button 
-                  onClick={handleAIAnalyze}
-                  className="w-full py-3 px-4 rounded-xl font-bold text-sm bg-bg-deep text-surface-2 flex items-center justify-center gap-1.5 shadow-lg shadow-bg-deep/10 cursor-pointer hover:bg-bg-deep/90 transition-all"
-                >
-                  <Sparkles className="w-4 h-4 text-indigo-400" />
-                  Estimate Nutrition
-                </button>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* MODAL 2: Add Manual Entry Form Overlay */}
-      {isManualOpen && (
-        <div id="manual-add-modal" className="fixed inset-0 bg-bg-deep/50 backdrop-blur-[2px] flex items-end justify-center z-50">
-          <div className="absolute inset-0" onClick={() => setIsManualOpen(false)} />
-          <form 
-            onSubmit={handleManualAddSubmit}
-            className="bg-bg w-full max-w-[480px] rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto shadow-2xl relative z-10 space-y-4"
-          >
-            <div className="flex items-center justify-between">
-              <h4 className="font-serif font-bold text-[19px] text-bg-deep">Add food manually</h4>
-              <button 
-                type="button"
-                onClick={() => setIsManualOpen(false)}
-                className="w-8 h-8 rounded-full bg-surface-theme border border-rule flex items-center justify-center text-ink hover:bg-surface-2"
-              >
-                <X className="w-4 h-4" />
-              </button>
+          {/* MODAL 2: Add Manual Entry Form Overlay / Database Search */}
+          {isManualOpen && (
+            <div id="manual-add-modal" className="fixed inset-0 bg-bg-deep/50 backdrop-blur-[2px] flex items-end justify-center z-50 animate-fade-in">
+              <div className="absolute inset-0" onClick={() => setIsManualOpen(false)} />
+              <div className="bg-bg w-full max-w-[480px] rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto shadow-2xl relative z-10 space-y-4 animate-slide-up">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-serif font-bold text-[19px] text-bg-deep">Add food</h4>
+                  <button 
+                    type="button"
+                    onClick={() => setIsManualOpen(false)}
+                    className="w-8 h-8 rounded-full bg-surface-theme border border-rule flex items-center justify-center text-ink hover:bg-surface-2"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Free & AI-Optional Info Banner */}
+                <div className="p-3 bg-emerald-50/70 border border-emerald-200/50 rounded-xl text-[11px] text-emerald-800 leading-relaxed shadow-xs">
+                  💚 <strong>100% Free &amp; Offline Ready:</strong> Indian Cal search database runs completely offline on your device, with zero limits and no subscriptions! Log custom meals or choose from thousands of regional dishes.
+                </div>
+
+                {/* Tab Selector */}
+                <div className="grid grid-cols-2 p-1 bg-surface-theme border border-rule/50 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setManualTab('search')}
+                    className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      manualTab === 'search'
+                        ? 'bg-bg-deep text-surface-2 shadow-sm'
+                        : 'text-ink-soft hover:text-ink hover:bg-surface-2/50'
+                    }`}
+                  >
+                    🔍 Database Search (4,500+ Foods)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManualTab('custom')}
+                    className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      manualTab === 'custom'
+                        ? 'bg-bg-deep text-surface-2 shadow-sm'
+                        : 'text-ink-soft hover:text-ink hover:bg-surface-2/50'
+                    }`}
+                  >
+                    ✍️ Custom Manual Entry
+                  </button>
+                </div>
+
+                {/* TAB 1: DATABASE SEARCH */}
+                {manualTab === 'search' && (
+                  <div className="space-y-3">
+                    <div>
+                      <h5 className="font-serif font-bold text-[13px] text-bg-deep flex items-center gap-1">
+                        🔍 Preloaded Indian Food Database
+                      </h5>
+                      <p className="text-[10px] text-ink-soft leading-tight">
+                        Select from our massive database of 4,500+ built-in Indian foods &amp; dishes to log instantly.
+                      </p>
+                    </div>
+
+                    {/* Search and Category Filter */}
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={dirSearchQuery}
+                        onChange={(e) => setDirSearchQuery(e.target.value)}
+                        placeholder="Search database (e.g. roti, paneer, chicken, egg)..."
+                        className="w-full bg-surface-theme border border-rule rounded-xl px-3 py-2 text-[12.5px] text-ink focus:outline-none focus:border-protein placeholder-ink-soft/40"
+                      />
+
+                      {/* Category Horizonal List */}
+                      <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
+                        {["All", "Breads & Staples", "Rice & Grains", "Dals & Curries", "Breakfast & South Indian", "Street Food & Snacks", "Dairy & Gym Staples", "Sweets & Desserts", "Fruits & Salads"].map(cat => (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setDirSelectedCategory(cat)}
+                            className={`px-2.5 py-1 rounded-full text-[9.5px] font-bold cursor-pointer whitespace-nowrap transition-colors border ${
+                              dirSelectedCategory === cat
+                                ? 'bg-bg-deep text-surface-2 border-bg-deep shadow-sm'
+                                : 'bg-surface-theme text-ink-soft border-rule/40 hover:bg-surface-2'
+                            }`}
+                          >
+                            {cat.replace(" & Staples", "").replace(" & Grains", "").replace(" & Curries", "").replace(" & South Indian", "").replace(" & Snacks", "").replace(" & Gym Staples", "").replace(" & Desserts", "").replace(" & Salads", "")}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Search Results List */}
+                    <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
+                      {(() => {
+                        const filtered = INDIAN_FOOD_DB.filter(item => {
+                          const matchesCat = dirSelectedCategory === 'All' || item.category === dirSelectedCategory;
+                          const matchesSearch = !dirSearchQuery.trim() || 
+                            item.name.toLowerCase().includes(dirSearchQuery.toLowerCase()) ||
+                            item.aliases.some(a => a.includes(dirSearchQuery.toLowerCase()));
+                          return matchesCat && matchesSearch;
+                        });
+
+                        if (filtered.length === 0) {
+                          return (
+                            <p className="text-[11px] text-ink-soft italic text-center py-3">
+                              No items match "{dirSearchQuery}" in this category.
+                            </p>
+                          );
+                        }
+
+                        return filtered.map(item => {
+                          return (
+                            <div 
+                              key={item.id}
+                              className="bg-surface-theme hover:bg-surface-2 rounded-xl p-2.5 border border-rule/30 flex items-center justify-between gap-3 transition-colors text-left"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <span className="block text-[12px] font-bold text-ink truncate">{item.name}</span>
+                                <span className="block text-[9.5px] text-ink-soft">
+                                  {item.serving} · <b className="text-protein">{item.calories} kcal</b> · P: {item.protein}g · C: {item.carbs}g · F: {item.fat}g
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    addEntry({
+                                      name: `1x ${item.name}`,
+                                      calories: Math.max(0, Math.round(item.calories)),
+                                      protein: Math.max(0, Math.round(item.protein * 10) / 10),
+                                      carbs: Math.max(0, Math.round(item.carbs * 10) / 10),
+                                      fat: Math.max(0, Math.round(item.fat * 10) / 10),
+                                      source: 'manual'
+                                    });
+                                    setIsManualOpen(false);
+                                    setDirSearchQuery('');
+                                  }}
+                                  className="px-2 py-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 rounded-lg transition-all cursor-pointer"
+                                >
+                                  + Log Item
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setMName(item.name);
+                                    setMCal(item.calories.toString());
+                                    setMProtein(item.protein.toString());
+                                    setMCarbs(item.carbs.toString());
+                                    setMFat(item.fat.toString());
+                                    setManualTab('custom');
+                                  }}
+                                  className="px-2 py-1 text-[10px] font-medium text-ink-soft bg-surface-theme hover:bg-surface-2 border border-rule/50 rounded-lg transition-all cursor-pointer"
+                                  title="Tweak values first"
+                                >
+                                  ✏️ Edit
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {/* TAB 2: CUSTOM MANUAL ENTRY FORM */}
+                {manualTab === 'custom' && (
+                  <form 
+                    onSubmit={handleManualAddSubmit}
+                    className="space-y-4"
+                  >
+                    <div className="space-y-3.5">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">Food Name</label>
+                        <input 
+                          type="text" 
+                          value={mName}
+                          onChange={(e) => setMName(e.target.value)}
+                          placeholder="e.g. Masala Dosa with Chutney"
+                          className="w-full bg-surface-theme border border-rule rounded-xl px-3.5 py-2.5 text-[14px] text-ink focus:outline-none focus:border-protein placeholder-ink-soft/30"
+                          required
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">Calories (kcal)</label>
+                        <input 
+                          type="number" 
+                          value={mCal}
+                          onChange={(e) => setMCal(e.target.value)}
+                          placeholder="0"
+                          min="0"
+                          className="w-full bg-surface-theme border border-rule rounded-xl px-3.5 py-2.5 text-[14px] text-ink focus:outline-none focus:border-protein"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2.5">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">Protein (g)</label>
+                          <input 
+                            type="number" 
+                            value={mProtein}
+                            onChange={(e) => setMProtein(e.target.value)}
+                            placeholder="0"
+                            min="0"
+                            step="0.1"
+                            className="w-full bg-surface-theme border border-rule rounded-xl px-3 py-2.5 text-[13px] text-ink focus:outline-none focus:border-protein"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">Carbs (g)</label>
+                          <input 
+                            type="number" 
+                            value={mCarbs}
+                            onChange={(e) => setMCarbs(e.target.value)}
+                            placeholder="0"
+                            min="0"
+                            step="0.1"
+                            className="w-full bg-surface-theme border border-rule rounded-xl px-3 py-2.5 text-[13px] text-ink focus:outline-none focus:border-protein"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">Fat (g)</label>
+                          <input 
+                            type="number" 
+                            value={mFat}
+                            onChange={(e) => setMFat(e.target.value)}
+                            placeholder="0"
+                            min="0"
+                            step="0.1"
+                            className="w-full bg-surface-theme border border-rule rounded-xl px-3 py-2.5 text-[13px] text-ink focus:outline-none focus:border-protein"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <button 
+                      type="submit"
+                      className="w-full py-3.5 bg-bg-deep text-surface-2 font-bold text-sm rounded-xl cursor-pointer hover:bg-bg-deep/90 transition-colors"
+                    >
+                      Add to log
+                    </button>
+                  </form>
+                )}
+              </div>
             </div>
-
-            <div className="space-y-3.5">
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">Food Name</label>
-                <input 
-                  type="text" 
-                  value={mName}
-                  onChange={(e) => setMName(e.target.value)}
-                  placeholder="e.g. Masala Dosa with Chutney"
-                  className="w-full bg-surface-theme border border-rule rounded-xl px-3.5 py-2.5 text-[14px] text-ink focus:outline-none focus:border-protein placeholder-ink-soft/30"
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">Calories (kcal)</label>
-                <input 
-                  type="number" 
-                  value={mCal}
-                  onChange={(e) => setMCal(e.target.value)}
-                  placeholder="0"
-                  min="0"
-                  className="w-full bg-surface-theme border border-rule rounded-xl px-3.5 py-2.5 text-[14px] text-ink focus:outline-none focus:border-protein"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-2.5">
-                <div className="flex flex-col gap-1">
-                  <label className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">Protein (g)</label>
-                  <input 
-                    type="number" 
-                    value={mProtein}
-                    onChange={(e) => setMProtein(e.target.value)}
-                    placeholder="0"
-                    min="0"
-                    step="0.1"
-                    className="w-full bg-surface-theme border border-rule rounded-xl px-3 py-2.5 text-[13px] text-ink focus:outline-none focus:border-protein"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">Carbs (g)</label>
-                  <input 
-                    type="number" 
-                    value={mCarbs}
-                    onChange={(e) => setMCarbs(e.target.value)}
-                    placeholder="0"
-                    min="0"
-                    step="0.1"
-                    className="w-full bg-surface-theme border border-rule rounded-xl px-3 py-2.5 text-[13px] text-ink focus:outline-none focus:border-protein"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">Fat (g)</label>
-                  <input 
-                    type="number" 
-                    value={mFat}
-                    onChange={(e) => setMFat(e.target.value)}
-                    placeholder="0"
-                    min="0"
-                    step="0.1"
-                    className="w-full bg-surface-theme border border-rule rounded-xl px-3 py-2.5 text-[13px] text-ink focus:outline-none focus:border-protein"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <button 
-              type="submit"
-              className="w-full py-3.5 bg-bg-deep text-surface-2 font-bold text-sm rounded-xl cursor-pointer hover:bg-bg-deep/90 transition-colors"
-            >
-              Add to log
-            </button>
-          </form>
-        </div>
-      )}
+          )}
 
       {/* MODAL 3: Settings Daily Goals Overlay */}
       {isSettingsOpen && (
@@ -2915,6 +3646,18 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
             </div>
 
             <div className="space-y-3.5">
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-protein tracking-wider uppercase">Your Name</label>
+                <input 
+                  type="text" 
+                  value={gName}
+                  onChange={(e) => setGName(e.target.value)}
+                  placeholder="e.g. Aayush"
+                  className="w-full bg-surface-theme border border-rule rounded-xl px-3.5 py-2.5 text-[14px] text-ink focus:outline-none focus:border-protein"
+                  required
+                />
+              </div>
+
               <div className="flex flex-col gap-1">
                 <label className="text-[11px] font-bold text-ink-soft tracking-wider uppercase">Calorie Goal (kcal)</label>
                 <input 
@@ -2964,28 +3707,43 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
               </div>
             </div>
 
+            {/* Visual Theme Selector */}
+            <div className="bg-surface-2 p-3.5 rounded-2xl border border-rule/40 space-y-2.5">
+              <span className="text-[11px] font-bold text-ink-soft tracking-wider uppercase block">Visual Theme</span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTheme('light')}
+                  className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                    theme === 'light'
+                      ? 'bg-bg-deep text-surface-2 border-bg-deep shadow-sm'
+                      : 'bg-surface-theme text-ink-soft border-rule/50 hover:bg-surface-2'
+                  }`}
+                >
+                  <Sun className="w-3.5 h-3.5" />
+                  <span>Light Mode</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTheme('dark')}
+                  className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                    theme === 'dark'
+                      ? 'bg-bg-deep text-surface-2 border-bg-deep shadow-sm'
+                      : 'bg-surface-theme text-ink-soft border-rule/50 hover:bg-surface-2'
+                  }`}
+                >
+                  <Moon className="w-3.5 h-3.5" />
+                  <span>Dark Mode</span>
+                </button>
+              </div>
+            </div>
+
             <button 
               type="submit"
               className="w-full py-3.5 bg-bg-deep text-surface-2 font-bold text-sm rounded-xl cursor-pointer hover:bg-bg-deep/90 transition-colors"
             >
               Save targets
             </button>
-
-            {showInstallBtn && (
-              <div className="pt-4 border-t border-rule/50 mt-2">
-                <button
-                  type="button"
-                  onClick={handleInstallClick}
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl cursor-pointer transition-colors flex items-center justify-center gap-2 shadow-sm"
-                >
-                  <Download className="w-4 h-4" />
-                  Install App on Home Screen
-                </button>
-                <p className="text-[10.1px] text-ink-soft text-center mt-1.5 leading-tight">
-                  Get offline support, smaller app size, and instant calorie logs!
-                </p>
-              </div>
-            )}
 
             <div className="pt-2 text-center border-t border-rule/50 mt-4">
               <button
@@ -3258,13 +4016,18 @@ Join me on Indian Cal and build your ideal physique with authentic food tracking
               {/* Title Header */}
               <div className="z-10 mt-1">
                 <div className="font-serif font-bold text-[20px] text-[#EBE3D5] tracking-wide leading-none">🇮🇳 INDIAN CAL</div>
-                <div className="text-[9px] font-mono font-bold tracking-widest text-[#B49664] mt-2">DAILY MACRO SUMMARY</div>
+                <div className="text-[9px] font-mono font-bold tracking-widest text-[#B49664] mt-2">
+                  {onboardName ? `${onboardName.toUpperCase()}'S DAILY MACRO SUMMARY` : 'DAILY MACRO SUMMARY'}
+                </div>
                 <div className="w-12 h-0.5 bg-[#B49664]/30 mx-auto mt-2" />
               </div>
 
               {/* Avatar Pill Badge */}
               <div className="z-10 px-3.5 py-1.5 rounded-full bg-white/5 border border-[#B49664]/20 text-[11.5px] font-bold text-[#EBE3D5]">
-                {AVATARS.find(a => a.id === desiAvatar)?.emoji} {AVATARS.find(a => a.id === desiAvatar)?.name} • {AVATARS.find(a => a.id === desiAvatar)?.title}
+                {(() => {
+                  const currentAv = getAvatarInfo(desiAvatar);
+                  return `${currentAv.emoji} ${currentAv.name} • ${currentAv.title}`;
+                })()}
               </div>
 
               {/* Central Concentric Rings */}

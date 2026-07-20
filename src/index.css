@@ -6,20 +6,20 @@
   --font-serif: "Fraunces", Georgia, serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
   
-  --color-bg: #F4E9CE;
-  --color-bg-deep: #1F1B14;
-  --color-ink: #2B2417;
-  --color-ink-soft: #6B6046;
-  --color-surface-theme: #FFFCF4;
-  --color-surface-2: #FBF2DC;
-  --color-rule: #E2D3AC;
-  --color-protein: #A6321C;
-  --color-protein-soft: #EFD3CB;
-  --color-carbs: #C98A1E;
-  --color-carbs-soft: #F3E1BC;
-  --color-fat: #6B7F3A;
-  --color-fat-soft: #DDE3C5;
-  --color-danger: #A6321C;
+  --color-bg: var(--bg);
+  --color-bg-deep: var(--bg-deep);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-surface-theme: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-rule: var(--rule);
+  --color-protein: var(--protein);
+  --color-protein-soft: var(--protein-soft);
+  --color-carbs: var(--carbs);
+  --color-carbs-soft: var(--carbs-soft);
+  --color-fat: var(--fat);
+  --color-fat-soft: var(--fat-soft);
+  --color-danger: var(--danger);
 }
 
 :root {
@@ -41,6 +41,24 @@
   --radius: 18px;
 }
 
+.dark {
+  --bg: #15120E;
+  --bg-deep: #FFFCF4; /* Cream white for key display headers on dark canvas */
+  --ink: #FDF9F0;
+  --ink-soft: #A2967C;
+  --surface: #201B14; /* Slightly lighter warm rich clay */
+  --surface-2: #28221B; /* Stepped lighter surface for lists & details */
+  --rule: #3D3528;
+  --protein: #E0533C;
+  --protein-soft: #38150F;
+  --carbs: #E5A434;
+  --carbs-soft: #3D2D12;
+  --fat: #8AA34E;
+  --fat-soft: #232A14;
+  --danger: #E0533C;
+  --shadow: 0 4px 16px rgba(0,0,0,0.45);
+}
+
 body {
   background: var(--bg);
   background-image:
@@ -50,5 +68,23 @@ body {
   font-family: 'Inter', sans-serif;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
+
+.dark body {
+  background-image:
+    radial-gradient(circle at 15% 8%, rgba(229,164,52,0.06), transparent 40%),
+    radial-gradient(circle at 90% 90%, rgba(224,83,60,0.05), transparent 45%);
+}
+
+/* Hide scrollbars globally for a premium native app feel */
+::-webkit-scrollbar {
+  display: none !important;
+}
+
+html, body {
+  -ms-overflow-style: none !important;  /* IE and Edge */
+  scrollbar-width: none !important;  /* Firefox */
+}
+
 

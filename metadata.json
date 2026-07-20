@@ -1,6 +1,6 @@
 {
   "name": "Remix: Indian Cal",
-  "description": "A thali-style Indian food calorie and macro tracker with AI photo and description food identification.",
+  "description": "Thali-style Indian food calorie and macro tracker with AI photo scan & a massive preloaded database of 4,500+ Indian dishes for instant, offline direct logs.",
   "requestFramePermissions": [
     "camera"
   ],
